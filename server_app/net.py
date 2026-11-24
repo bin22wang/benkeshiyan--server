@@ -285,6 +285,7 @@ class UDPServer:
                         car.heading = yaw
                         car.battery = voltage
                         car.velocity = {"vx": vx, "vy": vy, "vz": vz}
+                        car.omega = vz
                         car.speed = (vx ** 2 + vy ** 2) ** 0.5
                         car.last_update = current_time
                         car.update_count += 1
@@ -296,6 +297,7 @@ class UDPServer:
                         car.heading = yaw
                         car.battery = voltage
                         car.velocity = {"vx": vx, "vy": vy, "vz": vz}
+                        car.omega = vz
                         car.speed = (vx ** 2 + vy ** 2) ** 0.5
                         car.last_update = current_time
                         print(f" 新小车连接: {car_id} from {normalized_addr}")

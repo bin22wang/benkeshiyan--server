@@ -139,6 +139,7 @@ manual_bind_state = {
 
 # 低频快照节流状态：仅供 vision 模块的低频快照函数使用
 snapshot_lowfreq_state = {"last_ts": 0.0}
+snapshot_lowfreq_lock = threading.Lock()
 
 # ------------------------------------------------------------------------------
 # UDP 服务器单例
