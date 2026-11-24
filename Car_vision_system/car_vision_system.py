@@ -18,7 +18,7 @@ CONFIG = {
     # 检测下采样倍率：在 1/DETECT_SCALE 分辨率上跑 detectMarkers，角点再放大回全分辨率并 subpix 精修。
     # 2 = 在 320x240 上检测(推荐，卡顿明显缓解且精度基本无损)；1 = 全分辨率检测(最慢)；3 = 更快但远距离小标签可能漏检。
     "DETECT_SCALE": 2,
-    "SKIP_CAMERA_INDICES": [],#修改这个列表即可控制跳过哪些摄像头索引，如 [0, 1] 跳过索引 0 和 1，[] 不跳过任何摄像头。
+    "SKIP_CAMERA_INDICES": [0],#修改这个列表即可控制跳过哪些摄像头索引，如 [0, 1] 跳过索引 0 和 1，[] 不跳过任何摄像头。
 }
 # ==========================================
 
@@ -259,9 +259,10 @@ class PoseEstimator:
             return None, None
 
         print(f"[Estimator] 使用标定文件: {params_path}")
-        data = np.load(params_path)
-        self.camera_params_cache[car_id] = (data['mtx'], data['dist'])
-        return data['mtx'], data['dist']
+        with np.load(params_path) as data:
+            mtx, dist = data['mtx'], data['dist']
+        self.camera_params_cache[car_id] = (mtx, dist)
+        return mtx, dist
 
     def process_frame(self, frame, car_id):
         """

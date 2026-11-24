@@ -21,7 +21,7 @@
 from flask import Blueprint, request, jsonify
 
 from .. import state
-from formation_controller import get_formation_info, get_rectangle_experiment_info
+from formation_controller import get_formation_info, get_rectangle_experiment_info, get_fxt_experiment_info
 
 control_bp = Blueprint('control', __name__)
 
@@ -37,6 +37,10 @@ def control_car_position():
     rect_info = get_rectangle_experiment_info()
     if rect_info.get('active'):
         return jsonify({'success': False, 'error': '矩形轨迹实验进行中，已锁定单车位置控制！'})
+
+    fxt_info = get_fxt_experiment_info()
+    if fxt_info.get('active'):
+        return jsonify({'success': False, 'error': 'FXT编队实验进行中，已锁定单车位置控制！'})
 
     data = request.json
     car_id = data.get('car_id')
@@ -66,6 +70,10 @@ def control_car_velocity():
     rect_info = get_rectangle_experiment_info()
     if rect_info.get('active'):
         return jsonify({'success': False, 'error': '矩形轨迹实验进行中，已锁定遥控！'})
+
+    fxt_info = get_fxt_experiment_info()
+    if fxt_info.get('active'):
+        return jsonify({'success': False, 'error': 'FXT编队实验进行中，已锁定遥控！'})
 
     vx = data.get('vx', 0.0)
     vy = data.get('vy', 0.0)

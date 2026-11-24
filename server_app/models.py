@@ -30,6 +30,7 @@ class Car:
         self.heading = 0
         self.battery = 100
         self.velocity = {"vx": 0, "vy": 0, "vz": 0}
+        self.omega = 0.0
         self.speed = 0
         self.connected = True
         self.last_update = time.time()

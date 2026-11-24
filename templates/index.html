@@ -1949,6 +1949,36 @@
                                         </div>
                                         <div class="broadcast-status" id="rectExperimentStatus">状态: 未启用</div>
                                     </div>
+                                    <div class="control-section">
+                                        <h3>FXT固定时间编队实验</h3>
+                                        <div style="display: grid; gap: 8px;">
+                                            <div>
+                                                <label>速度 (m/s):</label>
+                                                <input type="number" id="fxtSpeed" class="coord-input" value="0.15" step="0.01" min="0.05" max="0.3">
+                                            </div>
+                                            <div>
+                                                <label>队形:</label>
+                                                <select id="fxtFormationType" class="coord-input">
+                                                    <option value="diamond">菱形</option>
+                                                    <option value="triangle">三角形</option>
+                                                    <option value="line">直线</option>
+                                                </select>
+                                            </div>
+                                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+                                                <div><label>α_p:</label><input type="number" id="fxtAlphaP" class="coord-input" value="0.5" step="0.05" min="0.1" max="0.9"></div>
+                                                <div><label>β_p:</label><input type="number" id="fxtBetaP" class="coord-input" value="1.5" step="0.1" min="1.1" max="3.0"></div>
+                                                <div><label>k_p1:</label><input type="number" id="fxtKP1" class="coord-input" value="0.5" step="0.1" min="0.1"></div>
+                                                <div><label>k_p2:</label><input type="number" id="fxtKP2" class="coord-input" value="0.3" step="0.1" min="0.1"></div>
+                                                <div><label>k_v1:</label><input type="number" id="fxtKV1" class="coord-input" value="0.4" step="0.1" min="0.1"></div>
+                                                <div><label>k_v2:</label><input type="number" id="fxtKV2" class="coord-input" value="0.2" step="0.1" min="0.1"></div>
+                                            </div>
+                                        </div>
+                                        <div class="broadcast-controls" style="margin-top: 8px;">
+                                            <button class="broadcast-btn broadcast-on" onclick="startFxtExperiment()">▶ 启动FXT编队</button>
+                                            <button class="broadcast-btn broadcast-off" onclick="stopFxtExperiment()">⏹ 停止并下载数据</button>
+                                        </div>
+                                        <div class="broadcast-status" id="fxtExperimentStatus">状态: 未启用</div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -4340,6 +4370,102 @@
             }
         }
 
+        const fxtExperimentUiState = { active: false, lastDownloaded: new Set() };
+
+        function updateFxtExperimentStatus(active, detail = '') {
+            const statusEl = document.getElementById('fxtExperimentStatus');
+            if (!statusEl) return;
+            fxtExperimentUiState.active = active;
+            statusEl.textContent = '状态: ' + (active ? '运行中' : '未启用') + (detail ? ' | ' + detail : '');
+            statusEl.style.color = active ? 'var(--accent-green, #4CAF50)' : 'var(--text-1)';
+        }
+
+        function triggerFxtDownload(url, filename) {
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
+
+        async function startFxtExperiment() {
+            const speedInput = document.getElementById('fxtSpeed');
+            const speed = parseFloat(speedInput ? speedInput.value : 0.2);
+            const formationType = document.getElementById('fxtFormationType');
+            const alphaP = parseFloat(document.getElementById('fxtAlphaP').value);
+            const betaP = parseFloat(document.getElementById('fxtBetaP').value);
+            const kP1 = parseFloat(document.getElementById('fxtKP1').value);
+            const kP2 = parseFloat(document.getElementById('fxtKP2').value);
+            const kV1 = parseFloat(document.getElementById('fxtKV1').value);
+            const kV2 = parseFloat(document.getElementById('fxtKV2').value);
+
+            try {
+                await fetch('/api/formation/fxt/params', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ alpha_p: alphaP, beta_p: betaP, k_p1: kP1, k_p2: kP2, k_v1: kV1, k_v2: kV2, formation_type: formationType ? formationType.value : 'diamond' })
+                });
+                const response = await fetch('/api/formation/fxt/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ speed: speed })
+                });
+                const result = await response.json();
+                if (result.success) {
+                    fxtExperimentUiState.lastDownloaded = new Set();
+                    updateFxtExperimentStatus(true, `领航者: ${result.leader_id.replace('CAR', 'R#')}`);
+                } else {
+                    alert('启动FXT实验失败: ' + (result.error || '未知错误'));
+                }
+            } catch (error) {
+                console.error('启动FXT实验失败:', error);
+                alert('启动FXT实验失败: ' + error.message);
+            }
+        }
+
+        async function stopFxtExperiment() {
+            try {
+                const response = await fetch('/api/formation/fxt/stop', { method: 'POST' });
+                const result = await response.json();
+                if (result.success) {
+                    const files = Array.isArray(result.files) ? result.files : [];
+                    updateFxtExperimentStatus(false, files.length ? `已保存 ${files.length} 文件` : '已保存');
+                    const urls = Array.isArray(result.download_urls) ? result.download_urls : [];
+                    files.forEach((fileName, index) => {
+                        const url = urls[index];
+                        if (url) triggerFxtDownload(url, fileName);
+                    });
+                } else {
+                    alert('停止FXT实验失败: ' + (result.error || '未知错误'));
+                }
+            } catch (error) {
+                console.error('停止FXT实验失败:', error);
+            }
+        }
+
+        async function getFxtExperimentStatus() {
+            try {
+                const response = await fetch('/api/formation/fxt/status');
+                const status = await response.json();
+                if (status.active) {
+                    updateFxtExperimentStatus(true, `领航者: ${String(status.leader_id || '').replace('CAR', 'R#')} | ${status.phase || ''}`);
+                } else {
+                    const files = Array.isArray(status.files) ? status.files : [];
+                    updateFxtExperimentStatus(false, status.last_error ? `原因: ${status.last_error}` : (files.length ? `已保存 ${files.length} 文件` : ''));
+                    const urls = Array.isArray(status.download_urls) ? status.download_urls : [];
+                    files.forEach((fileName, index) => {
+                        if (fxtExperimentUiState.lastDownloaded.has(fileName)) return;
+                        const url = urls[index];
+                        fxtExperimentUiState.lastDownloaded.add(fileName);
+                        if (url) triggerFxtDownload(url, fileName);
+                    });
+                }
+            } catch (error) {
+                console.error('获取FXT实验状态失败:', error);
+            }
+        }
+
         function buildReconstructOptions(selectedId = '') {
             const connectedCars = cars.filter(car => car.connected).map(car => car.id);
             const options = connectedCars.map(carId => {
@@ -4894,6 +5020,8 @@
             setInterval(getReconstructStatus, 500);
             getRectangleExperimentStatus();
             setInterval(getRectangleExperimentStatus, 1000);
+            getFxtExperimentStatus();
+            setInterval(getFxtExperimentStatus, 1000);
             // 改为使用 MJPEG 流播放弹窗时的画面，轮询接口由备用路径保留但不主动频繁调用
             applyDefaultReconstructOrder();
 

@@ -67,12 +67,12 @@ def _capture_camera_frame(binder, cam_index, retries=5):
 def get_vision_image():
     """获取视觉监控图像（用于前端弹窗）。"""
     with state.vision_lock:
-        if state.vision_state["current_image"]:
+        if state.vision_state.get("current_image"):
             return jsonify({
                 'success': True,
-                'image': state.vision_state["current_image"],
-                'car_id': state.vision_state["current_error_car"],
-                'timestamp': state.vision_state["image_timestamp"],
+                'image': state.vision_state.get("current_image"),
+                'car_id': state.vision_state.get("current_error_car"),
+                'timestamp': state.vision_state.get("image_timestamp"),
                 'error': state.vision_state.get("current_error"),
                 'has_tag': state.vision_state.get("current_has_tag", False),
                 'warning': state.vision_state.get("last_warning")
@@ -198,7 +198,7 @@ def mjpeg_stream(car_id):
     try:
         with state.vision_lock:
             binder = state.vision_state.get('binder')
-        if binder is not None:
+        if binder is not None and not camera_manager.is_running(cam_index):
             camera_manager.switch_to(cam_index, binder)
     except Exception:
         pass
@@ -279,22 +279,27 @@ def manual_bind_start():
         return jsonify({'success': False, 'message': '视觉模块未初始化'}), 500
 
     def _start_task():
-        cameras = binder.list_available_cameras()
-        with state.vision_lock:
-            state.manual_bind_state["active"] = True
-            state.manual_bind_state["cameras"] = cameras
-            state.manual_bind_state["current_index"] = 0
-            state.manual_bind_state["current_frame_b64"] = None
-            state.manual_bind_state["bound_so_far"] = {}
-            state.manual_bind_state["finished"] = False
-        if cameras:
-            cam = cameras[0]
-            result = _capture_camera_frame(binder, cam["index"])
+        try:
+            cameras = binder.list_available_cameras()
             with state.vision_lock:
-                if result:
-                    state.manual_bind_state["current_frame_b64"] = result["frame_b64"]
-                else:
-                    state.manual_bind_state["current_frame_b64"] = None
+                state.manual_bind_state["active"] = True
+                state.manual_bind_state["cameras"] = cameras
+                state.manual_bind_state["current_index"] = 0
+                state.manual_bind_state["current_frame_b64"] = None
+                state.manual_bind_state["bound_so_far"] = {}
+                state.manual_bind_state["finished"] = False
+            if cameras:
+                cam = cameras[0]
+                result = _capture_camera_frame(binder, cam["index"])
+                with state.vision_lock:
+                    if result:
+                        state.manual_bind_state["current_frame_b64"] = result["frame_b64"]
+                    else:
+                        state.manual_bind_state["current_frame_b64"] = None
+        except Exception as e:
+            print(f" [manual_bind_start] 异常: {e}")
+            with state.vision_lock:
+                state.manual_bind_state["active"] = False
 
     threading.Thread(target=_start_task, daemon=True).start()
     return jsonify({'success': True, 'message': '手动绑定流程已启动'})
@@ -332,7 +337,7 @@ def manual_bind_confirm():
         mbs = state.manual_bind_state
         if not mbs.get("active"):
             return jsonify({'success': False, 'message': '手动绑定流程未启动'}), 400
-        cameras = mbs.get("cameras", [])
+        cameras = list(mbs.get("cameras", []))
         cur_idx = mbs.get("current_index", 0)
         if cur_idx >= len(cameras):
             return jsonify({'success': False, 'message': '没有更多摄像头'}), 400
@@ -340,21 +345,21 @@ def manual_bind_confirm():
         cam_index = cur_cam["index"]
         mbs["bound_so_far"][str(car_id).upper()] = cam_index
         next_idx = cur_idx + 1
-        if next_idx >= len(cameras):
+        finished = next_idx >= len(cameras)
+        if finished:
             mbs["finished"] = True
             mbs["current_index"] = next_idx
-            bound_result = dict(mbs["bound_so_far"])
-            binder = state.vision_state.get("binder")
         else:
             mbs["current_index"] = next_idx
-            binder = state.vision_state.get("binder")
+        bound_so_far_copy = dict(mbs["bound_so_far"])
+        binder = state.vision_state.get("binder")
 
-    if mbs["finished"]:
+    if finished:
         if binder:
             camera_manager = vision_ops.camera_manager
             camera_manager.stop_all_except(keep_index=-1)
             time.sleep(0.3)
-            result = binder.manual_bind(dict(mbs["bound_so_far"]))
+            result = binder.manual_bind(bound_so_far_copy)
             with state.vision_lock:
                 state.vision_state["bound_cameras"] = result
                 state.vision_state["last_warning"] = None if result else "手动绑定失败"
@@ -363,12 +368,18 @@ def manual_bind_confirm():
                 first_cam = next(iter(result.values()), None)
                 if first_cam is not None:
                     camera_manager.switch_to(first_cam, binder)
+        else:
+            with state.vision_lock:
+                state.manual_bind_state["active"] = False
         return jsonify({
             'success': True,
             'message': '全部摄像头绑定完成',
             'finished': True,
-            'bound_cameras': dict(mbs["bound_so_far"]),
+            'bound_cameras': bound_so_far_copy,
         })
+
+    if not binder:
+        return jsonify({'success': False, 'message': '视觉模块未初始化'}), 500
 
     next_cam = cameras[next_idx]
     result = _capture_camera_frame(binder, next_cam["index"])
@@ -394,24 +405,24 @@ def manual_bind_skip():
         mbs = state.manual_bind_state
         if not mbs.get("active"):
             return jsonify({'success': False, 'message': '手动绑定流程未启动'}), 400
-        cameras = mbs.get("cameras", [])
+        cameras = list(mbs.get("cameras", []))
         cur_idx = mbs.get("current_index", 0)
         next_idx = cur_idx + 1
-        if next_idx >= len(cameras):
+        finished = next_idx >= len(cameras)
+        if finished:
             mbs["finished"] = True
             mbs["current_index"] = next_idx
-            binder = state.vision_state.get("binder")
         else:
             mbs["current_index"] = next_idx
-            binder = state.vision_state.get("binder")
+        bound_so_far_copy = dict(mbs["bound_so_far"])
+        binder = state.vision_state.get("binder")
 
-    if mbs["finished"]:
-        bound_result = dict(mbs["bound_so_far"])
-        if bound_result and binder:
+    if finished:
+        if bound_so_far_copy and binder:
             camera_manager = vision_ops.camera_manager
             camera_manager.stop_all_except(keep_index=-1)
             time.sleep(0.3)
-            result = binder.manual_bind(bound_result)
+            result = binder.manual_bind(bound_so_far_copy)
             with state.vision_lock:
                 state.vision_state["bound_cameras"] = result
                 state.vision_state["last_warning"] = None if result else "手动绑定失败"
@@ -423,8 +434,11 @@ def manual_bind_skip():
             'success': True,
             'message': '已跳过，全部摄像头处理完毕',
             'finished': True,
-            'bound_cameras': dict(mbs["bound_so_far"]),
+            'bound_cameras': bound_so_far_copy,
         })
+
+    if not binder:
+        return jsonify({'success': False, 'message': '视觉模块未初始化'}), 500
 
     next_cam = cameras[next_idx]
     result = _capture_camera_frame(binder, next_cam["index"])

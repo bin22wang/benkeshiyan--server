@@ -189,6 +189,11 @@ class CameraManager:
         # 不在这里停止其他摄像头；调用者可选择调用 stop_all_except 保持平滑切换
         return True
 
+    def is_running(self, index):
+        """查询某相机抓帧线程是否正在运行。"""
+        with self._lock:
+            return index in self._cams and self._cams[index].get('running')
+
     def stop_camera(self, index):
         """停止某相机的抓帧线程并释放设备。"""
         with self._lock:
@@ -268,7 +273,7 @@ class CameraManager:
             frame_ts = st.get('frame_ts', 0)
             if frame is None:
                 return None
-            if st.get('jpeg_ts', 0) < frame_ts:
+            if st.get('jpeg_ts', 0) < frame_ts or st.get('jpeg_b64') is None:
                 try:
                     ok, buf = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)])
                     if ok:
@@ -382,7 +387,7 @@ def apply_vision_overlay(frame, car_id, corners, error_tuple, has_tag):
 def update_vision_snapshot(car_id, frame, error_tuple, has_tag):
     """把当前帧编码为 base64 并写入视觉/重构共享状态（供旧的轮询接口）。"""
     try:
-        # 使用 camera_manager 的编码缓存（若可用），避免每次重复编码
+        # 编码为 base64（encode_frame 为无状态编码，此处不使用缓存）
         image_base64 = None
         try:
             if camera_manager:
@@ -422,9 +427,10 @@ def maybe_update_snapshot_lowfreq(cam_index, car_id):
     原始帧并轻量叠加 overlay 后编码，且做时间节流，避免影响检测/制导更新率。
     """
     now = time.time()
-    if now - state.snapshot_lowfreq_state["last_ts"] < config.SNAPSHOT_LOWFREQ_INTERVAL:
-        return
-    state.snapshot_lowfreq_state["last_ts"] = now
+    with state.snapshot_lowfreq_lock:
+        if now - state.snapshot_lowfreq_state["last_ts"] < config.SNAPSHOT_LOWFREQ_INTERVAL:
+            return
+        state.snapshot_lowfreq_state["last_ts"] = now
     try:
         if cam_index is None:
             return
@@ -451,7 +457,11 @@ def mark_waiting_image_started(car_id):
             return
         # 延迟导入：make_step_runtime 属于 reconstruct 模块
         from .reconstruct import make_step_runtime
-        runtime = state.reconstruct_state.setdefault("step_runtime", {}).setdefault(car_id, make_step_runtime())
+        step_runtime = state.reconstruct_state.setdefault("step_runtime", {})
+        runtime = step_runtime.get(car_id)
+        if runtime is None:
+            runtime = make_step_runtime()
+            step_runtime[car_id] = runtime
         if not runtime.get("image_started", False):
             runtime["image_started"] = True
             runtime["img_meta_ts"] = time.time()
@@ -515,7 +525,6 @@ def vision_loop():
                 else:
                     active_cam_index = None
 
-                previous_cam = active_cam_index
                 active_car = target_car
                 with state.vision_lock:
                     state.vision_state["active_car_id"] = active_car
