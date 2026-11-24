@@ -57,15 +57,15 @@ def get_subnet_broadcast():
                     calculated_broadcast = '.'.join(broadcast_parts)
                     print(f" 计算得到广播地址: {calculated_broadcast} (接口: {interface})")
                     return calculated_broadcast
-        fallback_broadcast = "192.168.31.255"
+        fallback_broadcast = "192.168.1.1"
         print(f" 无法自动获取广播地址，使用默认: {fallback_broadcast}")
         return fallback_broadcast
     except ImportError:
         print(" 未安装netifaces库，使用默认广播地址")
-        return "192.168.31.255"
+        return "192.168.1.1"
     except Exception as e:
         print(f" 获取广播地址失败: {e}，使用默认广播地址")
-        return "192.168.31.255"
+        return "192.168.1.1"
 
 
 def _normalize_car_address(addr):
@@ -82,7 +82,7 @@ class BroadcastServer:
         self.port = port
         self.socket = None
         self.running = False
-        self.broadcast_address = "192.168.31.255"
+        self.broadcast_address = "192.168.1.1"
 
     def start(self):
         try:
